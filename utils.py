@@ -15,7 +15,7 @@ def get_torch_device():
     return device
 
 class HFDataset(Dataset):
-    
+
     def __init__(self, hf_dataset, transform=None):
         super().__init__()
         self.dataset = hf_dataset
@@ -34,10 +34,11 @@ class HFDataset(Dataset):
         return image
 
 def get_index_from_list(vals, t, x_shape):
-    """ 
+    """
     from: https://colab.research.google.com/drive/1sjy9odlSSy0RBVgMTgP7s99NXsqglsUL?usp=sharing#scrollTo=qWw50ui9IZ5q
     Returns a specific index t of a passed list of values vals while considering the batch dimension for broadcasting
     """
     batch_size = t.shape[0]
-    out = vals.gather(-1, t.cpu())
+    # out = vals.gather(-1, t.cpu())
+    out = vals.gather(-1, t)
     return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)

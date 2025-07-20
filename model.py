@@ -22,7 +22,7 @@ class Downsample(nn.Module):
         self.bnorm1 = nn.BatchNorm2d(out_ch)
         self.bnorm2 = nn.BatchNorm2d(out_ch)
         self.relu  = nn.ReLU()
-        
+
     def forward(self, x, t):
         # x: [B, in_ch, W, H]
         # t: [B, time_dim]
