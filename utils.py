@@ -1,7 +1,17 @@
-import torch
-from torch.utils.data import Dataset
+from datetime import datetime
+from pathlib import Path
 
-def get_torch_device():
+import pytz
+import torch
+from datasets import concatenate_datasets, load_dataset
+from torch.utils.data import ConcatDataset, Dataset
+from torchvision import datasets, transforms
+from torchvision.utils import make_grid, save_image
+import math
+
+supported_datasets = ['mnist', 'cifar10', 'tiny-imagenet', 'landscapes']
+
+def torch_get_device():
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
@@ -14,7 +24,24 @@ def get_torch_device():
             device = torch.device("cpu")
     return device
 
-class HFDataset(Dataset):
+def torch_set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+def torch_compile_ckpt_fix(state_dict):
+    # when torch.compiled a model, state_dict is updated with a prefix '_orig_mod.', renaming this
+    unwanted_prefix = '_orig_mod.'
+    for k,v in list(state_dict.items()):
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+    return state_dict
+
+def get_ist_time():
+    ist = pytz.timezone('Asia/Kolkata')
+    now_ist = datetime.now(ist)
+    return now_ist.strftime('%d-%m-%Y-%H%M')
+
+class HFDatasetWrapper(Dataset):
 
     def __init__(self, hf_dataset, transform=None):
         super().__init__()
@@ -26,19 +53,58 @@ class HFDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.dataset[idx]
+        # Ensure image has 3 channels and is in (H, W, C) format before transforming
         image = item['image'].convert('RGB')
+        label = item['label']
 
         if self.transform:
             image = self.transform(image)
 
-        return image
+        return image, torch.tensor(label, dtype=torch.long)
 
-def get_index_from_list(vals, t, x_shape):
-    """
-    from: https://colab.research.google.com/drive/1sjy9odlSSy0RBVgMTgP7s99NXsqglsUL?usp=sharing#scrollTo=qWw50ui9IZ5q
-    Returns a specific index t of a passed list of values vals while considering the batch dimension for broadcasting
-    """
-    batch_size = t.shape[0]
-    # out = vals.gather(-1, t.cpu())
-    out = vals.gather(-1, t)
-    return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
+def get_dataset(dataset_str):
+    assert dataset_str in supported_datasets
+    
+    print(f"Loading {dataset_str} dataset")
+    cache_dir = Path("./dataset-cache") / dataset_str
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    img_size = (32, 32) 
+    img_chls = 3
+    transform = transforms.Compose([
+        transforms.Resize(img_size),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Lambda(lambda x: x * 2 - 1),
+    ])
+    
+    if dataset_str == "tiny-imagenet":
+        train_ds = load_dataset('Maysee/tiny-imagenet', split='train', cache_dir=cache_dir)
+        val_ds = load_dataset('Maysee/tiny-imagenet', split='valid', cache_dir=cache_dir)
+        combined_ds = concatenate_datasets([train_ds, val_ds])
+        torch_ds = HFDatasetWrapper(combined_ds, transform)
+    elif dataset_str == "cifar10":
+        train_ds = datasets.CIFAR10(root=cache_dir, train=True, download=True, transform=transform)
+        val_ds = datasets.CIFAR10(root=cache_dir, train=False, download=True, transform=transform)
+        torch_ds = ConcatDataset([train_ds, val_ds])
+    elif dataset_str == "landscapes":
+        assert any(cache_dir.iterdir()), "Download dataset pls. run ./download-landscape.sh"
+        torch_ds = datasets.ImageFolder(cache_dir, transform=transform)
+    else: # MNIST
+        img_size = (24, 24)
+        img_chls = 1
+        transform = transforms.Compose([
+            transforms.Resize(img_size),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x * 2 - 1),
+        ])
+        train_ds = datasets.MNIST(root=cache_dir, train=True, download=True, transform=transform)
+        val_ds = datasets.MNIST(root=cache_dir, train=False, download=True, transform=transform)
+        torch_ds = ConcatDataset([train_ds, val_ds])
+    return img_size, img_chls, torch_ds
+
+def save_grid_square(imgs, img_path):
+    n = imgs.shape[0]
+    nrow = math.ceil(math.sqrt(n))
+    grid = make_grid(imgs.float(), nrow=nrow, padding=2, normalize=True)
+    save_image(grid, img_path)

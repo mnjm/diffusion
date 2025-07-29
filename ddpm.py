@@ -1,13 +1,13 @@
-import torch
-import torch.nn.functional as F
-from tqdm import tqdm
-from utils import get_torch_device, get_index_from_list
+from contextlib import nullcontext
 
-device = get_torch_device()
+import torch
+from tqdm import tqdm
+
 
 class Diffusion:
-    def __init__(self, T, beta_start=1e-4, beta_end=0.02, img_size=(32, 32), img_chnls=3, device="cpu"):
-        self.T = T
+    
+    def __init__(self, noise_steps, beta_start=1e-4, beta_end=0.02, img_size=(32, 32), img_chnls=3, device="cpu"):
+        self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
         self.img_size = img_size
@@ -16,62 +16,55 @@ class Diffusion:
 
         self.betas = self.prep_beta_schedule()
         self.alphas = 1.0 - self.betas
-        self.bar_alphas = torch.cumprod(self.alphas, dim=0)
-        self.sqrt_bar_alphas = torch.sqrt(self.bar_alphas)
-        self.sqrt_1_minus_bar_alphas = torch.sqrt(1 - self.bar_alphas)
-        self.bar_alphas_prev = F.pad(self.bar_alphas[:-1], (1, 0), value=1.0)
-        self.sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
-        self.sqrt_bar_alphas = torch.sqrt(self.bar_alphas)
-        posterior_variance = self.betas * (1. - self.bar_alphas_prev) / (1. - self.bar_alphas)
-        self.sqrt_posterior_variance = torch.sqrt(posterior_variance)
+        self.bar_alphas = torch.cumprod(self.alphas, dim=0).to(self.device)
 
     def prep_beta_schedule(self):
-        # TODO: Implement other schedulers, cosine, quadratic, sigmoidal
-        return torch.linspace(self.beta_start, self.beta_end, self.T).to(self.device)
+        return torch.linspace(self.beta_start, self.beta_end, self.noise_steps).to(self.device)
 
     def forward(self, x_0, t):
         noise = torch.randn_like(x_0)
-        sqrt_bar_alpha_t = get_index_from_list(self.sqrt_bar_alphas, t, x_0.shape)
-        sqrt_1_minus_bar_alpha_t = get_index_from_list(self.sqrt_1_minus_bar_alphas, t, x_0.shape)
+        sqrt_bar_alpha_t = torch.sqrt(self.bar_alphas[t])[:, None, None, None] # (B,1,1,1)
+        sqrt_1_minus_bar_alpha_t = torch.sqrt(1.0 - self.bar_alphas[t])[:, None, None, None] # (B,1,1,1)
         return sqrt_bar_alpha_t * x_0 + sqrt_1_minus_bar_alpha_t * noise, noise
 
     def sample_timesteps(self, n):
-        return torch.randint(low=1, high=self.T, size=(n,), device=self.device)
+        return torch.randint(low=1, high=self.noise_steps, size=(n,), device=self.device)
 
     @torch.no_grad()
-    def reverse_single_step(self, x, model, t):
-        beta_t = get_index_from_list(self.betas, t, x.shape)
-        sqrt_1_minus_bar_alpha_t = get_index_from_list(self.sqrt_1_minus_bar_alphas, t, x.shape)
-        sqrt_recip_alpha_t = get_index_from_list(self.sqrt_recip_alphas, t, x.shape)
-
-        model_mean = sqrt_recip_alpha_t * (x - beta_t * model(x, t) / sqrt_1_minus_bar_alpha_t)
-        sqrt_posterior_variance_t = get_index_from_list(self.sqrt_posterior_variance, t, x.shape)
-
-        if torch.all(t == 0):
-            return model_mean
+    def reverse(self, model, n=1, x_latent=None, debug=False, debug_steps=10, amp_ctx=None):
+        amp_ctx = nullcontext() if amp_ctx is None else amp_ctx
+        if x_latent is not None:
+            x = x_latent
         else:
-            noise = torch.randn_like(x)
-            return model_mean + sqrt_posterior_variance_t * noise
+            x = torch.randn((n, self.img_chnls, *self.img_size), device=self.device)
 
-    @torch.no_grad()
-    def reverse(self, model, n, debug=False, debug_steps=10):
-        x = torch.randn((n, self.img_chnls, *self.img_size), device=device)
+        debug_steps = min(debug_steps, self.noise_steps)
+        debug_stepsize = max(1, self.noise_steps // debug_steps)
 
-        debug_steps = min(debug_steps, self.T)
-        debug_stepsize = max(1, self.T // debug_steps)
-        
         debug_ret = None
         if debug:
             debug_ret = torch.zeros((debug_steps, n, self.img_chnls, *self.img_size), dtype=torch.uint8, device="cpu")
 
         step_idx = 0
-        for i in tqdm(reversed(range(self.T)), ncols=150, desc="Sampling"):
-            t = torch.full((n,), i, dtype=torch.long, device=device)
-            x = self.reverse_single_step(x, model, t)
-            x = x.clamp(-1.0, 1.0)
+        rev_t = list(reversed(range(1, self.noise_steps)))
+        for i in tqdm(rev_t, dynamic_ncols=True, desc="Sampling", leave=False):
+            t = torch.full((n,), i, dtype=torch.long, device=self.device)
+            with amp_ctx:
+                pred_noise = model(x, t)
+            alpha_t = self.alphas[t][:, None, None, None] # (B,1,1,1)
+            bar_alpha_t = self.bar_alphas[t][:, None, None, None] # (B,1,1,1)
+            beta_t = self.betas[t][:, None, None, None] # (B,1,1,1)
+            if i > 1:
+                noise = torch.randn_like(x)
+            else:
+                noise = torch.zeros_like(x)
+            x = 1 / torch.sqrt(alpha_t) * (x - ((1 - alpha_t) / (torch.sqrt(1 - bar_alpha_t))) * pred_noise) + torch.sqrt(beta_t) * noise
+            
             if debug and i % debug_stepsize == 0 and step_idx < debug_steps:
-                x_debug = (((x + 1) * 0.5) * 255).to("cpu").to(torch.uint8)
+                x_debug = (((x.clamp(-1.0, 1.0) + 1) * 0.5) * 255).to("cpu").to(torch.uint8)
                 debug_ret[step_idx] = x_debug
                 step_idx += 1
-
+        
+        x = x.clamp(-1.0, 1.0)
+        x = (((x + 1) * 0.5) * 255).to("cpu").to(torch.uint8)
         return x, debug_ret
