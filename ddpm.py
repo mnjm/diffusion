@@ -6,13 +6,14 @@ from tqdm import tqdm
 
 class Diffusion:
     
-    def __init__(self, noise_steps, beta_start=1e-4, beta_end=0.02, img_size=(32, 32), img_chnls=3, device="cpu"):
+    def __init__(self, noise_steps, beta_start=1e-4, beta_end=0.02, img_size=(32, 32), img_chnls=3, clfr_free_guidance=False, device="cpu"):
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
         self.img_size = img_size
         self.img_chnls = img_chnls
         self.device = device
+        self.clfr_free_guidance = clfr_free_guidance
 
         self.betas = self.prep_beta_schedule()
         self.alphas = 1.0 - self.betas
@@ -31,12 +32,9 @@ class Diffusion:
         return torch.randint(low=1, high=self.noise_steps, size=(n,), device=self.device)
 
     @torch.no_grad()
-    def reverse(self, model, n=1, x_latent=None, debug=False, debug_steps=10, amp_ctx=None):
+    def reverse(self, model, n=1, lbls=None, cfg_scale=0, debug=False, debug_steps=10, amp_ctx=None):
         amp_ctx = nullcontext() if amp_ctx is None else amp_ctx
-        if x_latent is not None:
-            x = x_latent
-        else:
-            x = torch.randn((n, self.img_chnls, *self.img_size), device=self.device)
+        x = torch.randn((n, self.img_chnls, *self.img_size), device=self.device)
 
         debug_steps = min(debug_steps, self.noise_steps)
         debug_stepsize = max(1, self.noise_steps // debug_steps)
@@ -50,7 +48,10 @@ class Diffusion:
         for i in tqdm(rev_t, dynamic_ncols=True, desc="Sampling", leave=False):
             t = torch.full((n,), i, dtype=torch.long, device=self.device)
             with amp_ctx:
-                pred_noise = model(x, t)
+                pred_noise = model(x, t, lbls)
+                if cfg_scale > 0:
+                    uncond_pred_noise = model(x, t, None)
+                    pred_noise = torch.lerp(uncond_pred_noise, pred_noise, cfg_scale)
             alpha_t = self.alphas[t][:, None, None, None] # (B,1,1,1)
             bar_alpha_t = self.bar_alphas[t][:, None, None, None] # (B,1,1,1)
             beta_t = self.betas[t][:, None, None, None] # (B,1,1,1)

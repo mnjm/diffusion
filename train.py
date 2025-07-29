@@ -1,4 +1,5 @@
 import os
+import random
 from contextlib import nullcontext
 from pathlib import Path
 from time import time
@@ -14,12 +15,13 @@ from tqdm import tqdm
 from ddpm import Diffusion
 from model import DiffusionUNet, DiffusionUNetConfig
 from utils import (
+    EMAModelWrapper,
     get_dataset,
-    torch_compile_ckpt_fix,
     get_ist_time,
+    save_imgs,
+    torch_compile_ckpt_fix,
     torch_get_device,
     torch_set_seed,
-    save_grid_square
 )
 
 device = torch_get_device()
@@ -28,9 +30,13 @@ print(f"using {device}")
 # -------------------- Params --------------------------
 rng_seed = 31415
 dataset = "cifar10" # should be one of 'mnist', 'cifar10', 'tiny-imagenet' or 'landscapes'
+clfr_free_guidance = False # classifier free guidance
+enable_ema = False
+ema_beta = 0.995
 noise_steps = 1000
 n_epochs = 500
 batch_size = 256 if device.type == "cuda" else 32
+ema_warmup_steps = 25600 // batch_size
 lr = 2e-4
 beta1 = 0.9
 beta2 = 0.95
@@ -38,12 +44,12 @@ weight_decay = 0.01
 init_from = 'scratch'
 save_every_epoch = 50
 vis_every_epoch = 10
-vis_n_samples = 16
+vis_n_samples = 10 if clfr_free_guidance else 16
 log_dir = "./logs"
-enable_wandb = True
-wandb_project = f"ddpm-base-{dataset}"
+enable_wandb = False
+wandb_project = f"diffusion-{dataset}"
 model_name = wandb_project
-run_name = get_ist_time()
+run_name = f"{'cfa_' if clfr_free_guidance else ''}{'ema_' if enable_ema else ''}" + get_ist_time()
 enable_torch_compile = device.type == "cuda"
 enable_tf32 = device.type == "cuda"
 torch_amp_dtype = 'bfloat16' if device.type == "cuda" and torch.cuda.is_bf16_supported() else 'float32'
@@ -56,21 +62,24 @@ config = { k:v for k,v in globals().items() if not k.startswith('_') and isinsta
 torch_amp_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[torch_amp_dtype]
 
 torch_set_seed(rng_seed)
+random.seed(rng_seed)
+
+if clfr_free_guidance:
+    assert vis_n_samples == 10, "vis_n_samples should be 10 while doing classfier free guidance based training"
 
 model_config = DiffusionUNetConfig()
+model_config.n_classes = 10 if clfr_free_guidance else 0
 img_size, img_chls, torch_ds = get_dataset(dataset)
 if img_size == (24, 24) and img_chls == 1:
     # MNIST requires liter model since its image size is 24, 24 with channels 1
-    model_config = DiffusionUNetConfig(
-        in_chls = 1,
-        out_chls = 1,
-        init_hidden_chls = 64,
-        chls_mult_factor = [1, 2, 4],
-        num_res_blocks = 2,
-        attention_resolutions = [12],
-        dropout = 0.1,
-        time_embed_dim = 256  
-    )
+    model_config.in_chls = 1
+    model_config.out_chls = 1
+    model_config.init_hidden_chls = 64
+    model_config.chls_mult_factor = [1, 2, 4]
+    model_config.num_res_blocks = 2
+    model_config.attention_resolutions = [12]
+    model_config.dropout = 0.1
+    model_config.time_embed_dim = 256
 
 dataloader = DataLoader(torch_ds, batch_size=batch_size, shuffle=True, drop_last=dataloader_drop_last,
                         pin_memory=dataloader_pin_memory, num_workers=dataloader_workers)
@@ -119,33 +128,45 @@ if enable_wandb:
 log_dir = Path(log_dir) / model_name / run_name
 log_dir.mkdir(parents=True, exist_ok=True)
 
+if enable_ema:
+    ema = EMAModelWrapper(model, ema_beta, ema_warmup_steps)
+    if init_from != "scratch":
+        ema.load(ckpt['ema'])
+
 # training
 model.train()
 for epoch in range(1, n_epochs + 1):
     t0 = time()
     loss_cum = 0.0
     print(f"Epoch {epoch}/{n_epochs}")
-    
+
     progress_bar = tqdm(dataloader, dynamic_ncols=True, desc="Training", leave=False)
-    
-    for step, imgs in enumerate(progress_bar):
-        imgs = imgs[0].to(device)
+
+    for step, batch in enumerate(progress_bar):
+        imgs = batch[0].to(device)
+        lbls = None
+        if clfr_free_guidance and random.random() < 0.9:
+            lbls = batch[1].to(device)
+
         optimizer.zero_grad()
-        
+
         B, C, H, W = imgs.shape
         t = diffusion.sample_timesteps(B)
         x_noisy, noise = diffusion.forward(imgs, t)
-        
+
         with amp_ctx:
-            noise_pred = model(x_noisy, t)
+            noise_pred = model(x_noisy, t, lbls)
             loss = F.mse_loss(noise, noise_pred)
-        
+
         loss.backward()
         optimizer.step()
         loss_cum += loss.item()
-        
+
+        if enable_ema:
+            ema.update(model)
+
         progress_bar.set_postfix({'loss': f"{loss.item():.4f}"})
-        
+
     if device.type == "cuda":
         torch.cuda.synchronize()
     epoch_time = time() - t0
@@ -157,20 +178,29 @@ for epoch in range(1, n_epochs + 1):
             'loss': avg_loss,
             'epoch_time': epoch_time,
         })
-    
+
     if epoch % vis_every_epoch == 0:
         model.eval()
         with torch.no_grad():
-            imgs, _ = diffusion.reverse(model, n=vis_n_samples, amp_ctx=amp_ctx)
+            lbls, cfg_scale = None, 0
+            if clfr_free_guidance:
+                lbls = torch.arange(0, 10, dtype=torch.long, device=device)
+                cfg_scale = 3
+            imgs, _ = diffusion.reverse(model, n=vis_n_samples, lbls=lbls, cfg_scale=cfg_scale, amp_ctx=amp_ctx)
             img_path = log_dir / f"{model_name}-{epoch:05d}.png"
-            save_grid_square(imgs, img_path)
+            save_imgs(imgs, img_path, nrow=5 if clfr_free_guidance else 0)
+            if enable_ema and ema.is_active():
+                imgs, _ = diffusion.reverse(ema, n=vis_n_samples, lbls=lbls, cfg_scale=cfg_scale, amp_ctx=amp_ctx)
+                img_path = log_dir / f"{model_name}-{epoch:05d}-ema.png"
+                save_imgs(imgs, img_path, nrow=5 if clfr_free_guidance else 0)
         print(f"Saved sample images generated to {str(img_path)}")
         model.train()
-    
+
     if epoch % save_every_epoch == 0:
-        ckpt_path = log_dir / f"{model_name}-{epoch:05d}.pt"
+        ckpt_path = log_dir / f"{model_name}.pt"
         torch.save({
             'model': model.state_dict(),
+            'ema': ema.state_dict() if enable_ema else None,
             'model_config': model_config,
             'config': config,
             'epoch': epoch,

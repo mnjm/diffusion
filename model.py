@@ -28,6 +28,7 @@ class DiffusionUNetConfig:
     attention_head: int = 4
     dropout: float = 0.1
     time_embed_dim: int = 512
+    n_classes: int = 0 # > 0 will use classifer free guidance
 
     def __post_init__(self):
         if self.out_chls is None:
@@ -171,9 +172,15 @@ class DiffusionUNet(nn.Module):
         # Final layers
         self.out_norm = nn.GroupNorm(8, ch)
         self.conv_out = nn.Conv2d(ch, cfg.out_chls, 3, padding=1)
+        
+        # Classifier Free Guidance
+        if cfg.n_classes > 0:
+            self.lbl_emb = nn.Embedding(cfg.n_classes, cfg.time_embed_dim)
     
-    def forward(self, x, t):
+    def forward(self, x, t, y=None):
         t_emb = self.time_embed(get_timestep_embedding(t, self.cfg.init_hidden_chls))
+        if y is not None: # Classifier Free Guidance
+            t_emb += self.lbl_emb(y)
         h = self.conv_in(x)
         skips = [h]
 
