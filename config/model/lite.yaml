@@ -1,0 +1,11 @@
+name: lite
+in_chls: ${dataset.img_chls}
+out_chls: ${dataset.img_chls}
+init_hidden_chls: 64
+chls_mult_factor: [1, 2, 4]
+num_res_blocks: 2
+attention_resolutions: [12]
+attention_head: 4
+dropout: 0.1
+time_embed_dim: 256
+n_classes: ${dataset.n_classes}

@@ -36,4 +36,6 @@ for file in $outdir/*.jpg; do
     fi
 done
 
+mv $outdir/7 $outdir/0
+
 echo Done

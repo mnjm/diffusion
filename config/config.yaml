@@ -1,0 +1,54 @@
+defaults:
+  - dataset: cifar10
+  - model: base
+  - _self_
+
+rng_seed: 31415
+
+diffusion:
+  noise_steps: 1000
+  beta_start: 1e-4
+  beta_end: 2e-2
+  cfg: # classifier free guidance
+    enable: false
+    scale: 3.0
+
+model_name: ${model.name}-${dataset.name}
+n_epochs: 500
+save_every_epoch: 50
+vis_every_epoch: 10
+vis_n_samples: 16 # will be set to n_classes when cfa.enable = true
+init_from: scratch
+device_type: cuda
+batch_size: 256
+torch_compile: true
+enable_tf32: true
+fwd_dtype: bfloat16
+dataloader:
+  workers: 4
+  pin_memory: true
+  drop_last: true
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 2e-4
+  betas: [0.9, 0.95]
+  weight_decay: 0.01
+  eps: 1e-8
+  fused: true
+ema:
+  enable: true
+  beta: 0.995
+  warmup_samples: 25600
+
+logging:
+  log_dir: ./logs
+  wandb:
+    enable: false
+    project: diffusion
+
+hydra:
+  job:
+    name: ${now:%d-%m-%y-%H%M%S}
+  run:
+    dir: ${logging.log_dir}/${model_name}/${hydra.job.name}
+  output_subdir: config

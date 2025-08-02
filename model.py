@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 @dataclass
 class DiffusionUNetConfig:
@@ -19,8 +19,9 @@ class DiffusionUNetConfig:
         - dropout = 0.1: dropout used in residual blocks
         - time_embed_dim = 512: dimension of time-step embedding vector
     """
+    name: str
     in_chls: int = 3
-    out_chls: Optional[int] = None
+    out_chls: int = 3
     init_hidden_chls: int = 128
     chls_mult_factor: List[int] = field(default_factory=lambda: [1, 2, 2, 2])
     num_res_blocks: int = 2
@@ -29,10 +30,6 @@ class DiffusionUNetConfig:
     dropout: float = 0.1
     time_embed_dim: int = 512
     n_classes: int = 0 # > 0 will use classifer free guidance
-
-    def __post_init__(self):
-        if self.out_chls is None:
-            self.out_chls = self.in_chls
 
 def get_timestep_embedding(timesteps, embedding_dim):
     """
@@ -52,35 +49,35 @@ class ResidualBlock(nn.Module):
     def __init__(self, in_chls, out_chls, time_emb_dim, dropout=0.1):
         super().__init__()
         self.time_emb_proj = nn.Linear(time_emb_dim, out_chls)
-        
+
         self.norm1 = nn.GroupNorm(8, in_chls)
         self.conv1 = nn.Conv2d(in_chls, out_chls, 3, padding=1)
-        
+
         self.norm2 = nn.GroupNorm(8, out_chls)
         self.conv2 = nn.Conv2d(out_chls, out_chls, 3, padding=1)
-        
+
         self.dropout = nn.Dropout(dropout)
-        
+
         if in_chls != out_chls:
             self.shortcut = nn.Conv2d(in_chls, out_chls, 1)
         else:
             self.shortcut = nn.Identity()
-    
+
     def forward(self, x, time_emb):
         h = self.norm1(x)
         h = F.silu(h)
         h = self.conv1(h)
-        
+
         # Add time embedding
         time_emb = F.silu(time_emb)
         time_emb = self.time_emb_proj(time_emb)[:, :, None, None]
         h = h + time_emb
-        
+
         h = self.norm2(h)
         h = F.silu(h)
         h = self.dropout(h)
         h = self.conv2(h)
-        
+
         return h + self.shortcut(x)
 
 class AttentionBlock(nn.Module):
@@ -101,7 +98,7 @@ class Downsample(nn.Module):
     def __init__(self, channels):
         super().__init__()
         self.conv = nn.Conv2d(channels, channels, 3, stride=2, padding=1)
-    
+
     def forward(self, x):
         return self.conv(x)
 
@@ -109,7 +106,7 @@ class Upsample(nn.Module):
     def __init__(self, channels):
         super().__init__()
         self.conv = nn.Conv2d(channels, channels, 3, padding=1)
-    
+
     def forward(self, x):
         x = F.interpolate(x, scale_factor=2, mode='nearest')
         return self.conv(x)
@@ -126,14 +123,14 @@ class DiffusionUNet(nn.Module):
             nn.SiLU(),
             nn.Linear(cfg.time_embed_dim, cfg.time_embed_dim),
         )
-        
+
         self.conv_in = nn.Conv2d(cfg.in_chls, ch, 3, padding=1)
         self.down_blocks = nn.ModuleList()
         self.up_blocks = nn.ModuleList()
         self.middle_block = nn.ModuleList()
         inp_chs = [ch]
         ds = 1
-        
+
         for i, mult in enumerate(cfg.chls_mult_factor):
             out_ch = mult * cfg.init_hidden_chls
             for _ in range(cfg.num_res_blocks):
@@ -146,15 +143,15 @@ class DiffusionUNet(nn.Module):
             if i != len(cfg.chls_mult_factor) - 1: # Dont downsample last layer
                 self.down_blocks.append(nn.ModuleList([Downsample(ch)]))
                 inp_chs.append(ch)
-                ds *= 2 
-        
+                ds *= 2
+
         # Middle block
         self.middle_block.extend([
             ResidualBlock(ch, ch, cfg.time_embed_dim, cfg.dropout),
             AttentionBlock(ch, cfg.attention_head),
             ResidualBlock(ch, ch, cfg.time_embed_dim, cfg.dropout)
         ])
-        
+
         # Upsampling layers
         for i, mult in reversed(list(enumerate(cfg.chls_mult_factor))):
             out_ch = mult * cfg.init_hidden_chls
@@ -168,15 +165,15 @@ class DiffusionUNet(nn.Module):
                     ds //= 2
                 self.up_blocks.append(nn.ModuleList(block))
                 ch = out_ch
-        
+
         # Final layers
         self.out_norm = nn.GroupNorm(8, ch)
         self.conv_out = nn.Conv2d(ch, cfg.out_chls, 3, padding=1)
-        
+
         # Classifier Free Guidance
         if cfg.n_classes > 0:
             self.lbl_emb = nn.Embedding(cfg.n_classes, cfg.time_embed_dim)
-    
+
     def forward(self, x, t, y=None):
         t_emb = self.time_embed(get_timestep_embedding(t, self.cfg.init_hidden_chls))
         if y is not None: # Classifier Free Guidance
@@ -205,19 +202,19 @@ class DiffusionUNet(nn.Module):
 if __name__ == "__main__":
     config = DiffusionUNetConfig()
     model = DiffusionUNet(config)
-    
+
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total parameters: {total_params // 1e6:.2f}M")
     print("Target: ~35.7M parameters")
-    
+
     # Test forward pass
     batch_size = 4
     x = torch.randn(batch_size, 3, 32, 32)
     t = torch.randint(0, 1000, (batch_size,))
-    
+
     with torch.no_grad():
         output = model(x, t)
-    
+
     print(f"Input shape: {x.shape}")
     print(f"Output shape: {output.shape}")

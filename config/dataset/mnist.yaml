@@ -1,0 +1,5 @@
+name: "mnist"
+img_size: [28, 28]
+img_chls: 1
+hor_flip_aug: false
+n_classes: 10

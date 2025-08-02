@@ -6,23 +6,29 @@ import pytz
 import torch
 from datasets import concatenate_datasets, load_dataset
 from torch.utils.data import ConcatDataset, Dataset
-from torchvision import datasets, transforms
+import torchvision.transforms as T
+from torchvision import datasets
 from torchvision.utils import make_grid, save_image
 import math
 
-supported_datasets = ['mnist', 'cifar10', 'tiny-imagenet', 'landscapes']
+supported_datasets = ['mnist', 'cifar10', 'tiny_imagenet', 'landscapes']
 
-def torch_get_device():
-    if torch.cuda.is_available():
+def torch_get_device(device_type):
+    if device_type == "cuda":
+        assert torch.cuda.is_available(), "CUDA is not available :(, `python train.py +device=cpu`"
         device = torch.device("cuda")
-    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
-        device = torch.device("mps")
+    elif device_type == "auto":
+        assert not torch.cuda.is_available(), "CUDA is available :), switch to cuda"
+        if torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            device = torch.device("mps")
+        else:
+            try:
+                import torch_xla.core.xla_model as xm  # type: ignore
+                device = xm.xla_device()
+            except ImportError:
+                device = torch.device("cpu")
     else:
-        try:
-            import torch_xla.core.xla_model as xm  # type: ignore
-            device = xm.xla_device()
-        except ImportError:
-            device = torch.device("cpu")
+        device = torch.device("cpu")
     return device
 
 def torch_set_seed(seed):
@@ -63,65 +69,58 @@ class HFDatasetWrapper(Dataset):
 
         return image, torch.tensor(label, dtype=torch.long)
 
-def get_dataset(dataset_str):
-    assert dataset_str in supported_datasets
-    
-    print(f"Loading {dataset_str} dataset")
-    cache_dir = Path("./dataset-cache") / dataset_str
+def get_dataset(ds_cfg):
+    assert ds_cfg.name in supported_datasets, "Unknown dataset"
+
+    print(f"Loading {ds_cfg.name} dataset")
+    cache_dir = Path("./dataset-cache") / ds_cfg.name
     cache_dir.mkdir(parents=True, exist_ok=True)
-    
-    img_size = (32, 32) 
-    img_chls = 3
-    transform = transforms.Compose([
-        transforms.Resize(img_size),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Lambda(lambda x: x * 2 - 1),
+
+    img_size = tuple(ds_cfg.img_size)
+    transform_l = [ T.Resize(img_size) ]
+    if ds_cfg.hor_flip_aug:
+        transform_l.append(T.RandomHorizontalFlip())
+    transform_l.extend([
+        T.ToTensor(),
+        T.Lambda(lambda x: x * 2 - 1),
     ])
-    
-    if dataset_str == "tiny-imagenet":
+    transform = T.Compose(transform_l)
+
+    if ds_cfg.name == "tiny-imagenet":
         train_ds = load_dataset('Maysee/tiny-imagenet', split='train', cache_dir=cache_dir)
         val_ds = load_dataset('Maysee/tiny-imagenet', split='valid', cache_dir=cache_dir)
         combined_ds = concatenate_datasets([train_ds, val_ds])
         torch_ds = HFDatasetWrapper(combined_ds, transform)
-    elif dataset_str == "cifar10":
+    elif ds_cfg.name == "cifar10":
         train_ds = datasets.CIFAR10(root=cache_dir, train=True, download=True, transform=transform)
         val_ds = datasets.CIFAR10(root=cache_dir, train=False, download=True, transform=transform)
         torch_ds = ConcatDataset([train_ds, val_ds])
-    elif dataset_str == "landscapes":
+    elif ds_cfg.name == "landscapes":
         assert any(cache_dir.iterdir()), "Download dataset pls. run ./download-landscape.sh"
         torch_ds = datasets.ImageFolder(cache_dir, transform=transform)
     else: # MNIST
-        img_size = (24, 24)
-        img_chls = 1
-        transform = transforms.Compose([
-            transforms.Resize(img_size),
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: x * 2 - 1),
-        ])
         train_ds = datasets.MNIST(root=cache_dir, train=True, download=True, transform=transform)
         val_ds = datasets.MNIST(root=cache_dir, train=False, download=True, transform=transform)
         torch_ds = ConcatDataset([train_ds, val_ds])
-    return img_size, img_chls, torch_ds
+    return torch_ds
 
 def save_imgs(imgs, img_path, nrow=0):
     n = imgs.shape[0]
-    if nrow == 0:
-        nrow = math.ceil(math.sqrt(n))
+    nrow = int(math.ceil(math.sqrt(n))) if nrow==0 else nrow
     grid = make_grid(imgs.float(), nrow=nrow, padding=2, normalize=True)
     save_image(grid, img_path)
 
 class EMAModelWrapper:
-    
+
     def __init__(self, model, beta=0.995, warmup_steps=100):
         self.ema_model = deepcopy(model).eval().requires_grad_(False)
         self.beta = beta
         self.warmup_steps = warmup_steps
         self.step = 0
-        
+
     def is_active(self):
         return self.step > self.warmup_steps
-    
+
     def state_dict(self):
         return {
             'beta': self.beta,
@@ -129,13 +128,13 @@ class EMAModelWrapper:
             'step': self.step,
             'ema_model': self.ema_model.state_dict(),
         }
-    
+
     def load(self, state_dict):
         self.beta = state_dict['beta']
         self.warmup_steps = state_dict['warmup_steps']
         self.step = state_dict['step']
         self.ema_model.load_state_dict(state_dict['ema_model'])
-    
+
     def update(self, base_model):
         self.step += 1
         if self.step == self.warmup_steps:
@@ -145,7 +144,7 @@ class EMAModelWrapper:
                 old, new = ema_param.data, base_param.data
                 ema_param.data = old * self.beta + (1-self.beta) * new
         return
-    
+
     def __call__(self, x, t, lbl=None):
         assert self.is_active(), "EMA model is not active yet"
         return self.ema_model(x, t, lbl)

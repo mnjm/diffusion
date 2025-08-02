@@ -1,0 +1,5 @@
+name: "tiny_imagenet"
+img_size: [64, 64]
+img_chls: 3
+hor_flip_aug: true
+n_classes: 200

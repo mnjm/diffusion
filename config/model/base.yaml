@@ -1,0 +1,11 @@
+name: base
+in_chls: ${dataset.img_chls}
+out_chls: ${dataset.img_chls}
+init_hidden_chls: 128
+chls_mult_factor: [1, 2, 2, 2]
+num_res_blocks: 2
+attention_resolutions: [16]
+attention_head: 4
+dropout: 0.1
+time_embed_dim: 512
+n_classes: ${dataset.n_classes}

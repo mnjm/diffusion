@@ -1,0 +1,5 @@
+name: "landscapes"
+img_size: [32, 32]
+img_chls: 3
+hor_flip_aug: true
+n_classes: 7
