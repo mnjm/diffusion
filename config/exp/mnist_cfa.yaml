@@ -4,7 +4,8 @@ defaults:
   - override /model: lite
 
 diffusion:
-  noise_steps: 200
+  timesteps: 128
+  schedule: cosine
   cfg: # classifier free guidance
     enable: true
     scale: 3.0

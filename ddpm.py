@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 class Diffusion:
 
     def __init__(self, cfg, img_size=(32, 32), img_chnls=3, device="cpu"):
-        self.noise_steps = cfg.noise_steps
+        self.timesteps = cfg.timesteps
         self.beta_start = cfg.beta_start
         self.beta_end = cfg.beta_end
         self.cfg = cfg.cfg.enable
@@ -17,16 +17,31 @@ class Diffusion:
         self.img_chnls = img_chnls
         self.device = device
 
-        self.betas = self.prep_beta_schedule()
-        self.alphas = 1.0 - self.betas
-        self.bar_alphas = torch.cumprod(self.alphas, dim=0).to(self.device)
+        supported_schedules = [ "linear", "cosine"]
+        assert cfg.schedule in supported_schedules, "Unknown diffusion beta schedule"
+        if cfg.schedule == "linear":
+            self._linear_schedule()
+        else:
+            self._cosine_schedule()
 
-        logger.info(f"Initializing Diffusion with {self.noise_steps} noise steps")
+        logger.info(f"Initializing Diffusion with {self.timesteps} noise steps")
         logger.info(f"CFG enabled: {self.cfg}, scale: {self.cfg_scale}")
 
-    def prep_beta_schedule(self):
-        # TODO: different schedule schemes
-        return torch.linspace(self.beta_start, self.beta_end, self.noise_steps, device=self.device)
+    def _linear_schedule(self):
+        self.betas = torch.linspace(self.beta_start, self.beta_end, self.timesteps, device=self.device)
+        self.alphas = 1.0 - self.betas
+        self.bar_alphas = torch.cumprod(self.alphas, dim=0)
+
+    def _cosine_schedule(self):
+        s = 0.008
+        T = self.timesteps
+        t = torch.arange(0, T + 1, dtype=torch.float32, device=self.device)
+        f_t = torch.cos(((t / T) + s) / (1 + s) * torch.pi / 2) ** 2
+        self.bar_alphas = f_t / f_t[0]
+        self.betas = 1 - (self.bar_alphas[1:] / self.bar_alphas[:-1])
+        # Clip to prevent singularities (as mentioned in the paper)
+        self.betas = torch.clamp(self.betas, 0.0001, 0.9999)
+        self.alphas = 1.0 - self.betas
 
     def forward(self, x_0, t):
         noise = torch.randn_like(x_0)
@@ -35,7 +50,7 @@ class Diffusion:
         return sqrt_bar_alpha_t * x_0 + sqrt_1_minus_bar_alpha_t * noise, noise
 
     def sample_timesteps(self, n):
-        return torch.randint(low=1, high=self.noise_steps, size=(n,), device=self.device)
+        return torch.randint(low=1, high=self.timesteps, size=(n,), device=self.device)
 
     @torch.no_grad()
     def reverse(self, model, n=1, lbls=None, debug=False, debug_steps=10, amp_ctx=None):
@@ -43,15 +58,15 @@ class Diffusion:
         amp_ctx = nullcontext() if amp_ctx is None else amp_ctx
         x = torch.randn((n, self.img_chnls, *self.img_size), device=self.device)
 
-        debug_steps = min(debug_steps, self.noise_steps)
-        debug_stepsize = max(1, self.noise_steps // debug_steps)
+        debug_steps = min(debug_steps, self.timesteps)
+        debug_stepsize = max(1, self.timesteps // debug_steps)
 
         debug_ret = None
         if debug:
             debug_ret = torch.zeros((debug_steps, n, self.img_chnls, *self.img_size), dtype=torch.uint8, device="cpu")
 
         step_idx = 0
-        rev_t = list(reversed(range(1, self.noise_steps)))
+        rev_t = list(reversed(range(1, self.timesteps)))
         for i in tqdm(rev_t, dynamic_ncols=True, desc="Sampling", leave=False):
             t = torch.full((n,), i, dtype=torch.long, device=self.device)
             with amp_ctx:

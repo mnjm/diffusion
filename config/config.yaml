@@ -6,9 +6,10 @@ defaults:
 rng_seed: 31415
 
 diffusion:
-  noise_steps: 1000
+  timesteps: 1000
   beta_start: 1e-4
-  beta_end: 2e-2
+  beta_end: 0.02
+  schedule: linear
   cfg: # classifier free guidance
     enable: false
     scale: 3.0
