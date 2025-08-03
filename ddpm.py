@@ -49,7 +49,7 @@ class Diffusion:
         return sqrt_bar_alpha_t * x_0 + sqrt_1_minus_bar_alpha_t * noise, noise
 
     def sample_timesteps(self, n):
-        return torch.randint(low=1, high=self.timesteps, size=(n,), device=self.device)
+        return torch.randint(low=0, high=self.timesteps, size=(n,), device=self.device)
 
     @torch.no_grad()
     def reverse(self, model, n=1, lbls=None, debug=False, debug_steps=10, amp_ctx=None):
@@ -65,8 +65,7 @@ class Diffusion:
             debug_ret = torch.zeros((debug_steps, n, self.img_chnls, *self.img_size), dtype=torch.uint8, device="cpu")
 
         step_idx = 0
-        rev_t = list(reversed(range(1, self.timesteps)))
-        for i in tqdm(rev_t, dynamic_ncols=True, desc="Sampling", leave=False):
+        for i in tqdm(range(self.timesteps)[::-1], dynamic_ncols=True, desc="Sampling", leave=False, total=self.timesteps):
             t = torch.full((n,), i, dtype=torch.long, device=self.device)
             with amp_ctx:
                 pred_noise = model(x, t, lbls)
@@ -76,17 +75,14 @@ class Diffusion:
             alpha_t = self.alphas[t][:, None, None, None] # (B,1,1,1)
             bar_alpha_t = self.bar_alphas[t][:, None, None, None] # (B,1,1,1)
             beta_t = self.betas[t][:, None, None, None] # (B,1,1,1)
-            if i > 1:
-                noise = torch.randn_like(x)
-            else:
-                noise = torch.zeros_like(x)
-            x = 1 / torch.sqrt(alpha_t) * (x - ((1 - alpha_t) / (torch.sqrt(1 - bar_alpha_t))) * pred_noise) + torch.sqrt(beta_t) * noise
-
+            x = 1 / torch.sqrt(alpha_t) * (x - ((1 - alpha_t) / (torch.sqrt(1 - bar_alpha_t))) * pred_noise)
+            if i > 0:
+                x = x + torch.sqrt(beta_t) * torch.randn_like(x)
             if debug and i % debug_stepsize == 0 and step_idx < debug_steps:
-                x_debug = (((x.clamp(-1.0, 1.0) + 1) * 0.5) * 255).to("cpu").to(torch.uint8)
+                x_debug = ((x.clamp(-1.0, 1) + 1) * 127.5).to("cpu").to(torch.uint8)
                 debug_ret[step_idx] = x_debug
                 step_idx += 1
 
-        x = x.clamp(-1.0, 1.0)
-        x = (((x + 1) * 0.5) * 255).to("cpu").to(torch.uint8)
+        x = x.clamp(-1, 1)
+        x = ((x + 1) * 127.5).to("cpu").to(torch.uint8)
         return x, debug_ret
