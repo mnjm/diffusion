@@ -10,13 +10,8 @@ diffusion:
     enable: true
     scale: 3.0
 n_epochs: 300
-device_type: auto
-batch_size: 32
-torch_compile: false
-enable_tf32: false
-fwd_dtype: float32
 dataloader:
-  workers: 0
+  workers: 2
   pin_memory: false
 logging:
   log_dir: ./logs

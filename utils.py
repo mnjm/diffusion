@@ -72,7 +72,6 @@ class HFDatasetWrapper(Dataset):
 def get_dataset(ds_cfg):
     assert ds_cfg.name in supported_datasets, "Unknown dataset"
 
-    print(f"Loading {ds_cfg.name} dataset")
     cache_dir = Path("./dataset-cache") / ds_cfg.name
     cache_dir.mkdir(parents=True, exist_ok=True)
 

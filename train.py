@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from time import time
 import hydra
+from omegaconf import OmegaConf
 import torch
 import torch.nn.functional as F
 import wandb
@@ -41,6 +42,7 @@ def main(config):
     model_config = DiffusionUNetConfig(**config.model)
 
     torch_ds = get_dataset(config.dataset)
+    logger.info(f"Loading {config.dataset.name} dataset")
     dataloader = DataLoader(
         torch_ds, batch_size=config.batch_size, shuffle=True, drop_last=config.dataloader.drop_last,
         pin_memory=config.dataloader.pin_memory, num_workers=config.dataloader.workers
@@ -69,14 +71,17 @@ def main(config):
         model.load_state_dict(torch_compile_ckpt_fix(ckpt['model']))
         logger.info(f"Loaded checkpoint from {config.init_from}")
 
-    logger.info(f"Model params: {sum(p.numel() for p in model.parameters()):,}")
+    logger.info(f"Model type: {model_config.name} params: {sum(p.numel() for p in model.parameters()):,}")
     if config.torch_compile:
+        if config.diffusion.cfg.enable:
+            torch._dynamo.config.force_parameter_static_shapes = False
         model = torch.compile(model)
 
     diffusion = Diffusion(
         config.diffusion, img_size=config.dataset.img_size,
         img_chnls=config.dataset.img_chls, device=device
     )
+    logger.info(f"Initializing {diffusion}")
     optimizer = hydra.utils.instantiate(config.optimizer, params=model.parameters())
 
     if config.init_from != 'scratch':
@@ -95,7 +100,11 @@ def main(config):
         wnb_key = os.getenv('WANDB_API_KEY')
         assert wnb_key is not None, "WANDB_API_KEY not loaded in env"
         wandb.login(key=wnb_key)
-        wandb.init(project=config.logging.wandb.project, name=run_name, config=config)
+        wandb.init(
+          project=config.logging.wandb.project,
+          name=run_name,
+          config=OmegaConf.to_container(config, resolve=True, throw_on_missing=True)
+        )
 
     if config.ema.enable:
         ema = EMAModelWrapper(model, config.ema.beta, config.ema.warmup_samples // config.batch_size)

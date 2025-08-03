@@ -1,9 +1,6 @@
 from contextlib import nullcontext
 import torch
-import logging
 from tqdm import tqdm
-
-logger = logging.getLogger(__name__)
 
 class Diffusion:
 
@@ -16,16 +13,20 @@ class Diffusion:
         self.img_size = img_size
         self.img_chnls = img_chnls
         self.device = device
+        self.schedule = cfg.schedule
 
         supported_schedules = [ "linear", "cosine"]
-        assert cfg.schedule in supported_schedules, "Unknown diffusion beta schedule"
-        if cfg.schedule == "linear":
+        assert self.schedule in supported_schedules, "Unknown diffusion beta schedule"
+        if self.schedule == "linear":
             self._linear_schedule()
         else:
             self._cosine_schedule()
 
-        logger.info(f"Initializing Diffusion with {self.timesteps} noise steps")
-        logger.info(f"CFG enabled: {self.cfg}, scale: {self.cfg_scale}")
+    def __repr__(self):
+        ret = f"Diffusion with {self.timesteps} timesteps {self.schedule} schedule"
+        if self.cfg:
+            ret += f"with CFG (scale:{self.cfg_scale})"
+        return ret
 
     def _linear_schedule(self):
         self.betas = torch.linspace(self.beta_start, self.beta_end, self.timesteps, device=self.device)
