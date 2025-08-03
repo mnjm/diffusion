@@ -1,5 +1,6 @@
 from contextlib import nullcontext
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 class Diffusion:
@@ -15,14 +16,18 @@ class Diffusion:
         self.device = device
         self.schedule = cfg.schedule
 
-        supported_schedules = [ "linear", "cosine"]
+        supported_schedules = { 'linear': self._linear_schedule, 'cosine': self._cosine_schedule }
         assert self.schedule in supported_schedules, "Unknown diffusion beta schedule"
-        if self.schedule == "linear":
-            self._linear_schedule()
-        else:
-            self._cosine_schedule()
-        self.alphas = 1.0 - self.betas
-        self.bar_alphas = torch.cumprod(self.alphas, dim=0)
+        # pre calculate coeffs
+        self.betas = supported_schedules[self.schedule]()
+        self.alphas = 1. - self.betas
+        self.alphas_bar = torch.cumprod(self.alphas, axis=0)
+        alphas_bar_prev = F.pad(self.alphas_bar[:-1], (1, 0), value=1.0)
+        self.sqrt_recip_alphas = torch.sqrt(1.0 / self.alphas)
+        self.sqrt_alphas_bar = torch.sqrt(self.alphas_bar)
+        self.sqrt_1_minus_alphas_bar = torch.sqrt(1. - self.alphas_bar)
+        posterior_var = self.betas * (1. - alphas_bar_prev) / (1. - self.alphas_bar)
+        self.sqrt_posterior_var = torch.sqrt(posterior_var)
 
     def __repr__(self):
         ret = f"Diffusion with {self.timesteps} timesteps {self.schedule} schedule"
@@ -31,7 +36,7 @@ class Diffusion:
         return ret
 
     def _linear_schedule(self):
-        self.betas = torch.linspace(self.beta_start, self.beta_end, self.timesteps, device=self.device)
+        return torch.linspace(self.beta_start, self.beta_end, self.timesteps, device=self.device)
 
     def _cosine_schedule(self):
         s = 0.008
@@ -40,12 +45,12 @@ class Diffusion:
         bar_alphas = torch.cos(((x / T) + s) / (1 + s) * torch.pi * 0.5) ** 2
         bar_alphas = bar_alphas / bar_alphas[0]
         betas = 1 - (bar_alphas[1:] / bar_alphas[:-1])
-        self.betas = torch.clip(betas, 0.0001, 0.9999)
+        return torch.clip(betas, 0.0001, 0.9999)
 
     def forward(self, x_0, t):
         noise = torch.randn_like(x_0)
-        sqrt_bar_alpha_t = torch.sqrt(self.bar_alphas[t])[:, None, None, None] # (B,1,1,1)
-        sqrt_1_minus_bar_alpha_t = torch.sqrt(1.0 - self.bar_alphas[t])[:, None, None, None] # (B,1,1,1)
+        sqrt_bar_alpha_t = self.sqrt_alphas_bar[t][:, None, None, None] # (B,1,1,1)
+        sqrt_1_minus_bar_alpha_t = self.sqrt_1_minus_alphas_bar[t][:, None, None, None] # (B,1,1,1)
         return sqrt_bar_alpha_t * x_0 + sqrt_1_minus_bar_alpha_t * noise, noise
 
     def sample_timesteps(self, n):
@@ -72,13 +77,12 @@ class Diffusion:
                 if self.cfg:
                     uncond_pred_noise = model(x, t, None)
                     pred_noise = torch.lerp(uncond_pred_noise, pred_noise, self.cfg_scale)
-            alpha_t = self.alphas[t][:, None, None, None] # (B,1,1,1)
-            bar_alpha_t = self.bar_alphas[t][:, None, None, None] # (B,1,1,1)
-            beta_t = self.betas[t][:, None, None, None] # (B,1,1,1)
-            bar_alpha_prev = self.bar_alphas[(t - 1).clamp(min=0)][:, None, None, None]
-            x = 1 / torch.sqrt(alpha_t) * (x - ((1 - alpha_t) / (torch.sqrt(1 - bar_alpha_t))) * pred_noise)
+            betas_t = self.betas[t][:, None, None, None] # (B,1,1,1)
+            sqrt_1_minus_alphas_bar_t = self.sqrt_1_minus_alphas_bar[t][:, None, None, None] # (B,1,1,1)
+            sqrt_recip_alphas_t = self.sqrt_recip_alphas[t][:, None, None, None] # (B,1,1,1)
+            x = sqrt_recip_alphas_t * (x - betas_t * pred_noise / sqrt_1_minus_alphas_bar_t)
             if i > 0:
-                sigma_t = torch.sqrt((1 - bar_alpha_prev) / (1 - bar_alpha_t) * beta_t)
+                sigma_t = self.sqrt_posterior_var[t][:, None, None, None] # (B,1,1,1)
                 x = x + sigma_t * torch.randn_like(x)
             if debug and i % debug_stepsize == 0 and step_idx < debug_steps:
                 x_debug = ((x.clamp(-1.0, 1) + 1) * 127.5).to("cpu").to(torch.uint8)
