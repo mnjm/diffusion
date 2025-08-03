@@ -75,9 +75,11 @@ class Diffusion:
             alpha_t = self.alphas[t][:, None, None, None] # (B,1,1,1)
             bar_alpha_t = self.bar_alphas[t][:, None, None, None] # (B,1,1,1)
             beta_t = self.betas[t][:, None, None, None] # (B,1,1,1)
+            bar_alpha_prev = self.bar_alphas[(t - 1).clamp(min=0)][:, None, None, None]
             x = 1 / torch.sqrt(alpha_t) * (x - ((1 - alpha_t) / (torch.sqrt(1 - bar_alpha_t))) * pred_noise)
             if i > 0:
-                x = x + torch.sqrt(beta_t) * torch.randn_like(x)
+                sigma_t = torch.sqrt((1 - bar_alpha_prev) / (1 - bar_alpha_t) * beta_t)
+                x = x + sigma_t * torch.randn_like(x)
             if debug and i % debug_stepsize == 0 and step_idx < debug_steps:
                 x_debug = ((x.clamp(-1.0, 1) + 1) * 127.5).to("cpu").to(torch.uint8)
                 debug_ret[step_idx] = x_debug
