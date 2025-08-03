@@ -63,7 +63,7 @@ def main(config):
         ckpt = torch.load(config.init_from, map_location=device, weights_only=False)
         ckpt_cfg = ckpt['config']
         model_config = DiffusionUNetConfig(**ckpt_cfg.model)
-        assert config.diffusion.noise_steps == ckpt_cfg.diffusion.noise_steps, f"Different noise_steps: ckpt noise steps {ckpt_cfg.diffusion.noise_steps}"
+        assert config.diffusion.timesteps == ckpt_cfg.diffusion.timesteps, f"Different timesteps: ckpt timesteps {ckpt_cfg.diffusion.timesteps}"
         assert model_config.n_classes > 0 if config.diffusion.cfg.enable else model_config.n_classes == 0, f"Incompatible model {config.diffusion.cfg.enable=} {model_config.n_classes=}"
         assert config.dataset.name == ckpt_cfg.dataset.name, f"Different dataset: {ckpt_cfg.dataset.name}"
         model = DiffusionUNet(model_config)

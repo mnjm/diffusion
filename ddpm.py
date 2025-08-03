@@ -21,6 +21,8 @@ class Diffusion:
             self._linear_schedule()
         else:
             self._cosine_schedule()
+        self.alphas = 1.0 - self.betas
+        self.bar_alphas = torch.cumprod(self.alphas, dim=0)
 
     def __repr__(self):
         ret = f"Diffusion with {self.timesteps} timesteps {self.schedule} schedule"
@@ -30,21 +32,15 @@ class Diffusion:
 
     def _linear_schedule(self):
         self.betas = torch.linspace(self.beta_start, self.beta_end, self.timesteps, device=self.device)
-        self.alphas = 1.0 - self.betas
-        self.bar_alphas = torch.cumprod(self.alphas, dim=0)
 
     def _cosine_schedule(self):
         s = 0.008
         T = self.timesteps
-        t = torch.arange(0, T + 1, dtype=torch.float32, device=self.device)
-        f_t = torch.cos(((t / T) + s) / (1 + s) * torch.pi / 2) ** 2
-        self.bar_alphas = f_t / f_t[0]
-        self.betas = 1 - (self.bar_alphas[1:] / self.bar_alphas[:-1])
-        # Clip to prevent singularities (as mentioned in the paper)
-        self.betas = torch.clamp(self.betas, 0.0001, 0.9999)
-        self.alphas = 1.0 - self.betas
-        # fix, has one more entry in self.bar_alphas remove it
-        self.bar_alphas = self.bar_alphas[1:]
+        x = torch.linspace(0, T, T+1, device=self.device)
+        bar_alphas = torch.cos(((x / T) + s) / (1 + s) * torch.pi * 0.5) ** 2
+        bar_alphas = bar_alphas / bar_alphas[0]
+        betas = 1 - (bar_alphas[1:] / bar_alphas[:-1])
+        self.betas = torch.clip(betas, 0.0001, 0.9999)
 
     def forward(self, x_0, t):
         noise = torch.randn_like(x_0)
