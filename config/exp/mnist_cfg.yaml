@@ -9,12 +9,15 @@ diffusion:
   cfg: # classifier free guidance
     enable: true
     scale: 3.0
+ema:
+  enable: false
 n_epochs: 300
+fwd_dtype: float32
+batch_size: 128
 dataloader:
   workers: 2
-  pin_memory: false
 logging:
   log_dir: ./logs
   wandb:
-    enable: false
+    enable: true
     project: diffusion

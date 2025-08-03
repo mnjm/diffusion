@@ -49,7 +49,7 @@ logging:
 
 hydra:
   job:
-    name: ${now:%d-%m-%y-%H%M%S}
+    name: ${model_name}-${now:%d-%m-%y-%H%M%S}
   run:
-    dir: ${logging.log_dir}/${model_name}/${hydra.job.name}
+    dir: ${logging.log_dir}/${hydra.job.name}
   output_subdir: config

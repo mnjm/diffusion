@@ -43,6 +43,8 @@ class Diffusion:
         # Clip to prevent singularities (as mentioned in the paper)
         self.betas = torch.clamp(self.betas, 0.0001, 0.9999)
         self.alphas = 1.0 - self.betas
+        # fix, has one more entry in self.bar_alphas remove it
+        self.bar_alphas = self.bar_alphas[1:]
 
     def forward(self, x_0, t):
         noise = torch.randn_like(x_0)
