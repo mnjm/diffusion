@@ -24,7 +24,7 @@ cfg: # classifier free guidance
 """
 rng_seed = 31415
 
-def sample(ckpt_path: Path, n: int = 20):
+def sample(ckpt_path: Path, n: int = 20, save: bool = False):
     torch_set_seed(rng_seed)
     device_type = "cuda" if torch.cuda.is_available() else "auto"
     device = torch_get_device(device_type)
@@ -42,6 +42,7 @@ def sample(ckpt_path: Path, n: int = 20):
         img_size, img_chnls = cfg.dataset.img_size, cfg.dataset.img_chls
         n_classes = cfg.model.n_classes
         diffusion_cfg = cfg.diffusion
+        dataset = cfg.dataset.name
     else:
         model_config = ckpt['model_config']
         model = DiffusionUNet(model_config)
@@ -51,9 +52,12 @@ def sample(ckpt_path: Path, n: int = 20):
         img_size, img_chnls = (32, 32), 3
         n_classes = 0
         diffusion_cfg = OmegaConf.create(old_cfg_yml)
+        dataset = ckpt['config']['dataset']
 
     diffusion = Diffusion(diffusion_cfg, img_size, img_chnls, device=device)
     print(f"Loaded {diffusion}")
+    cfg_enabled = diffusion.cfg
+    beta_schedule = diffusion.schedule
 
     if n_classes > 0:
         lbls = torch.arange(n_classes, dtype=torch.long, device=device).repeat((n + n_classes - 1) // n_classes)[:n]
@@ -67,12 +71,19 @@ def sample(ckpt_path: Path, n: int = 20):
     plt.imshow(grid)
     plt.axis("off")
     plt.tight_layout()
+    title = f"{dataset} ({beta_schedule=})"
+    if cfg_enabled:
+        title += " with CFG"
+    plt.title(title)
+    if save:
+        plt.savefig('sampled.jpg', bbox_inches='tight', pad_inches=0)
     plt.show()
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Sample images using a diffusion model checkpoint.")
     parser.add_argument("ckpt_path", type=Path, help="Path to the model checkpoint file.")
     parser.add_argument("-n", "--num_images", type=int, default=20, help="Number of images to sample. Default is 20.")
+    parser.add_argument("-s", "--save", action="store_true", help="Save sampled images. Omit to skip saving.")
 
     args = parser.parse_args()
-    sample(args.ckpt_path, args.num_images)
+    sample(args.ckpt_path, args.num_images, args.save)

@@ -4,3 +4,4 @@ __pycache__
 logs
 dataset-cache
 wandb
+sampled.jpg

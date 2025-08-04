@@ -32,7 +32,7 @@ class Diffusion:
     def __repr__(self):
         ret = f"Diffusion with {self.timesteps} timesteps {self.schedule} schedule"
         if self.cfg:
-            ret += f"with CFG (scale:{self.cfg_scale})"
+            ret += f" with CFG (scale:{self.cfg_scale})"
         return ret
 
     def _linear_schedule(self):
@@ -45,7 +45,8 @@ class Diffusion:
         bar_alphas = torch.cos(((x / T) + s) / (1 + s) * torch.pi * 0.5) ** 2
         bar_alphas = bar_alphas / bar_alphas[0]
         betas = 1 - (bar_alphas[1:] / bar_alphas[:-1])
-        return torch.clip(betas, 0.0001, 0.9999)
+        # return torch.clip(betas, 0.0001, 0.9999)
+        return torch.clip(betas, 0, 0.9999)
 
     def forward(self, x_0, t):
         noise = torch.randn_like(x_0)
@@ -84,11 +85,11 @@ class Diffusion:
             if i > 0:
                 sigma_t = self.sqrt_posterior_var[t][:, None, None, None] # (B,1,1,1)
                 x = x + sigma_t * torch.randn_like(x)
+            x = x.clamp(-1, 1) # NOTE: This is to retain images in same dist (-1, 1). Otherwise creates maddied images
             if debug and i % debug_stepsize == 0 and step_idx < debug_steps:
                 x_debug = ((x.clamp(-1.0, 1) + 1) * 127.5).to("cpu").to(torch.uint8)
                 debug_ret[step_idx] = x_debug
                 step_idx += 1
 
-        x = x.clamp(-1, 1)
         x = ((x + 1) * 127.5).to("cpu").to(torch.uint8)
         return x, debug_ret
