@@ -21,9 +21,11 @@ from utils import (
     torch_compile_ckpt_fix,
     torch_get_device,
     torch_set_seed,
+    get_ist_time_now,
 )
+OmegaConf.register_new_resolver("now_ist", get_ist_time_now)
 
-@hydra.main(version_base=None, config_path="config", config_name="config")
+@hydra.main(version_base=None, config_path="config", config_name="default")
 def main(config):
     logger = logging.getLogger(__name__)
     device = torch_get_device(config.device_type)
@@ -32,7 +34,7 @@ def main(config):
     config.vis_n_samples = config.dataset.n_classes if config.diffusion.cfg.enable else config.vis_n_samples
     log_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     run_name = hydra.core.hydra_config.HydraConfig.get().job.name
-    torch_fwd_dtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[config.fwd_dtype]
+    torch_amp_dtype = {'f32': torch.float32, 'bf16': torch.bfloat16}[config.amp_dtype]
 
     torch_set_seed(config.rng_seed)
     random.seed(config.rng_seed)
@@ -56,6 +58,7 @@ def main(config):
     # plt.show()
     # import sys; sys.exit(0)
 
+    start_epoch = 1
     if config.init_from == 'scratch':
         model = DiffusionUNet(model_config)
         model.to(device)
@@ -70,6 +73,7 @@ def main(config):
         model.to(device)
         model.load_state_dict(torch_compile_ckpt_fix(ckpt['model']))
         logger.info(f"Loaded checkpoint from {config.init_from}")
+        start_epoch = ckpt['epoch']
 
     logger.info(f"Model type: {model_config.name} params: {sum(p.numel() for p in model.parameters()):,}")
     if config.torch_compile:
@@ -90,8 +94,8 @@ def main(config):
     if config.enable_tf32:
         torch.set_float32_matmul_precision("high")
     amp_ctx = (
-        torch.amp.autocast(device_type=device.type, dtype=torch_fwd_dtype)
-        if device.type == "cuda" and torch_fwd_dtype == torch.bfloat16
+        torch.amp.autocast(device_type=device.type, dtype=torch_amp_dtype)
+        if device.type == "cuda" and torch_amp_dtype == torch.bfloat16
         else nullcontext()
     )
 
@@ -105,6 +109,13 @@ def main(config):
           name=run_name,
           config=OmegaConf.to_container(config, resolve=True, throw_on_missing=True)
         )
+        wandb.define_metric("epoch")
+        wandb.define_metric("loss", step_metric="epoch")
+        wandb.define_metric("epoch_time", step_metric="epoch")
+        if config.logging.wandb.log_imgs:
+            wandb.define_metric("samples", step_metric="epoch")
+            if config.ema.enable:
+                wandb.define_metric("ema_samples", step_metric="epoch")
 
     if config.ema.enable:
         ema = EMAModelWrapper(model, config.ema.beta, config.ema.warmup_samples // config.batch_size)
@@ -112,7 +123,8 @@ def main(config):
             ema.load(ckpt['ema'])
 
     model.train()
-    for epoch in range(1, config.n_epochs + 1):
+    p_keep= 1. - config.diffusion.cfg.p_drop # prob at which labels are retained during cfg enabled training
+    for epoch in range(start_epoch, config.n_epochs + 1):
         t0 = time()
         loss_cum = 0.0
         logger.info(f"Epoch {epoch}/{config.n_epochs}")
@@ -122,7 +134,7 @@ def main(config):
         for step, batch in enumerate(progress_bar):
             imgs = batch[0].to(device)
             lbls = None
-            if config.diffusion.cfg.enable and random.random() < 0.9:
+            if config.diffusion.cfg.enable and random.random() < p_keep:
                 lbls = batch[1].to(device)
 
             optimizer.zero_grad()
@@ -165,11 +177,21 @@ def main(config):
                     lbls = torch.arange(0, config.vis_n_samples, dtype=torch.long, device=device)
                 imgs, _ = diffusion.reverse(model, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                 img_path = log_dir / f"{config.model_name}-{epoch:05d}.png"
-                save_imgs(imgs, img_path)
+                img = save_imgs(imgs, img_path).permute(1, 2, 0).numpy()
+                if config.logging.wandb.log_imgs:
+                    wandb.log({
+                        "samples": wandb.Image(img),
+                        'epoch': epoch,
+                    })
                 if config.ema.enable and ema.is_active():
                     imgs, _ = diffusion.reverse(ema, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                     img_path = log_dir / f"{config.model_name}-{epoch:05d}-ema.png"
-                    save_imgs(imgs, img_path)
+                    img = save_imgs(imgs, img_path).permute(1, 2, 0).numpy()
+                    if config.logging.wandb.log_imgs:
+                        wandb.log({
+                            "ema_samples": wandb.Image(img),
+                            'epoch': epoch,
+                        })
             logger.info(f"Saved sample images generated to {str(img_path)}")
             model.train()
 

@@ -43,10 +43,10 @@ def torch_compile_ckpt_fix(state_dict):
             state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
     return state_dict
 
-def get_ist_time():
+def get_ist_time_now(fmt="%d-%m-%Y-%H%M%S"):
     ist = pytz.timezone('Asia/Kolkata')
     now_ist = datetime.now(ist)
-    return now_ist.strftime('%d-%m-%Y-%H%M')
+    return now_ist.strftime(fmt)
 
 class HFDatasetWrapper(Dataset):
 
@@ -108,6 +108,7 @@ def save_imgs(imgs, img_path, nrow=0):
     nrow = int(math.ceil(math.sqrt(n))) if nrow==0 else nrow
     grid = make_grid(imgs.float(), nrow=nrow, padding=2, normalize=True)
     save_image(grid, img_path)
+    return grid
 
 class EMAModelWrapper:
 

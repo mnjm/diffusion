@@ -55,6 +55,7 @@ def sample(ckpt_path: Path, n: int = 20, save: bool = False):
         dataset = ckpt['config']['dataset']
 
     diffusion = Diffusion(diffusion_cfg, img_size, img_chnls, device=device)
+    # diffusion.cfg_scale = 6.0
     print(f"Loaded {diffusion}")
     cfg_enabled = diffusion.cfg
     beta_schedule = diffusion.schedule
@@ -65,16 +66,17 @@ def sample(ckpt_path: Path, n: int = 20, save: bool = False):
         lbls = None
     imgs, _ = diffusion.reverse(model, n, lbls)
 
-    nrow = int(math.ceil(math.sqrt(n)))
+    nrow = int(math.ceil(math.sqrt(n))) if n_classes == 0 else n_classes
     grid = make_grid(imgs.to("cpu").float(), nrow=nrow, normalize=True)
     grid = grid.permute(1, 2, 0).numpy()
+    plt.figure(facecolor='black')
     plt.imshow(grid)
     plt.axis("off")
     plt.tight_layout()
     title = f"{dataset} ({beta_schedule=})"
     if cfg_enabled:
         title += " with CFG"
-    plt.title(title)
+    plt.title(title, color='white')
     if save:
         plt.savefig('sampled.jpg', bbox_inches='tight', pad_inches=0)
     plt.show()
