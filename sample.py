@@ -11,6 +11,7 @@ from utils import (
     torch_compile_ckpt_fix,
     torch_get_device,
     torch_set_seed,
+    sample_lbls
 )
 
 old_cfg_yml = """
@@ -24,7 +25,7 @@ cfg: # classifier free guidance
 """
 rng_seed = 31415
 
-def sample(ckpt_path: Path, n: int = 20, save: bool = False):
+def sample(ckpt_path: Path, n: int = 20, save: bool = False, beta_steps: int = -1, cfg_scale: float = 3.0):
     torch_set_seed(rng_seed)
     device_type = "cuda" if torch.cuda.is_available() else "auto"
     device = torch_get_device(device_type)
@@ -54,16 +55,19 @@ def sample(ckpt_path: Path, n: int = 20, save: bool = False):
         diffusion_cfg = OmegaConf.create(old_cfg_yml)
         dataset = ckpt['config']['dataset']
 
+    diffusion_cfg.cfg.scale = cfg_scale
+    if beta_steps != -1:
+        diffusion_cfg.timesteps = beta_steps
     diffusion = Diffusion(diffusion_cfg, img_size, img_chnls, device=device)
-    # diffusion.cfg_scale = 6.0
     print(f"Loaded {diffusion}")
     cfg_enabled = diffusion.cfg
     beta_schedule = diffusion.schedule
 
-    if n_classes > 0:
-        lbls = torch.arange(n_classes, dtype=torch.long, device=device).repeat((n + n_classes - 1) // n_classes)[:n]
-    else:
-        lbls = None
+    lbls = (
+        sample_lbls(n_classes, n, device)
+        if n_classes > 0 else
+        None
+    )
     imgs, _ = diffusion.reverse(model, n, lbls)
 
     nrow = int(math.ceil(math.sqrt(n))) if n_classes == 0 else n_classes
@@ -86,6 +90,8 @@ if __name__ == "__main__":
     parser.add_argument("ckpt_path", type=Path, help="Path to the model checkpoint file.")
     parser.add_argument("-n", "--num_images", type=int, default=20, help="Number of images to sample. Default is 20.")
     parser.add_argument("-s", "--save", action="store_true", help="Save sampled images. Omit to skip saving.")
+    parser.add_argument("-st", "--beta_steps", type=int, default=-1, help="Beta timesteps to use for sampling. default: -1 (use training time beta steps)")
+    parser.add_argument("-cs", "--cfg_scale", type=float, default=3.0, help="CFG Scale to use with CFG is enabled")
 
     args = parser.parse_args()
-    sample(args.ckpt_path, args.num_images, args.save)
+    sample(args.ckpt_path, args.num_images, args.save, args.beta_steps, args.cfg_scale)

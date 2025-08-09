@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
-  - override /dataset: cifar10
-  - override /model: base
+  - override /dataset: mnist
+  - override /model: tiny
 
 diffusion:
   timesteps: 256
@@ -12,13 +12,4 @@ diffusion:
 ema:
   enable: false
 n_epochs: 300
-fwd_dtype: bfloat16
-torch_compile: true
-batch_size: 256
-dataloader:
-  workers: 4
-logging:
-  log_dir: ./logs
-  wandb:
-    enable: false
-    project: diffusion
+vis_n_samples: 50

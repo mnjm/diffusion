@@ -110,6 +110,9 @@ def save_imgs(imgs, img_path, nrow=0):
     save_image(grid, img_path)
     return grid
 
+def sample_lbls(n_class, n, device="cpu"):
+    return torch.arange(n_class, dtype=torch.long, device=device).repeat((n + n_class - 1) // n_class)[:n]
+
 class EMAModelWrapper:
 
     def __init__(self, model, beta=0.995, warmup_steps=100):

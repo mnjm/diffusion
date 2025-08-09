@@ -4,21 +4,12 @@ defaults:
   - override /model: base
 
 diffusion:
-  timesteps: 256
+  timesteps: 1000
   schedule: cosine
   cfg: # classifier free guidance
     enable: true
     scale: 3.0
 ema:
   enable: false
-n_epochs: 300
-fwd_dtype: bfloat16
-torch_compile: true
-batch_size: 256
-dataloader:
-  workers: 4
-logging:
-  log_dir: ./logs
-  wandb:
-    enable: false
-    project: diffusion
+n_epochs: 500
+vis_n_samples: 50

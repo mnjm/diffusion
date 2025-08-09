@@ -48,6 +48,7 @@ class Diffusion:
         # return torch.clip(betas, 0.0001, 0.9999)
         return torch.clip(betas, 0, 0.9999)
 
+    @torch.no_grad()
     def forward(self, x_0, t):
         noise = torch.randn_like(x_0)
         sqrt_bar_alpha_t = self.sqrt_alphas_bar[t][:, None, None, None] # (B,1,1,1)
@@ -55,7 +56,7 @@ class Diffusion:
         return sqrt_bar_alpha_t * x_0 + sqrt_1_minus_bar_alpha_t * noise, noise
 
     def sample_timesteps(self, n):
-        return torch.randint(low=0, high=self.timesteps, size=(n,), device=self.device)
+        return torch.randint(low=1, high=self.timesteps, size=(n,), device=self.device)
 
     @torch.no_grad()
     def reverse(self, model, n=1, lbls=None, debug=False, debug_steps=10, amp_ctx=None):
@@ -71,7 +72,7 @@ class Diffusion:
             debug_ret = torch.zeros((debug_steps, n, self.img_chnls, *self.img_size), dtype=torch.uint8, device="cpu")
 
         step_idx = 0
-        for i in tqdm(range(self.timesteps)[::-1], dynamic_ncols=True, desc="Sampling", leave=False, total=self.timesteps):
+        for i in tqdm(reversed(range(1, self.timesteps)), dynamic_ncols=True, desc="Sampling", leave=False, total=self.timesteps-1):
             t = torch.full((n,), i, dtype=torch.long, device=self.device)
             with amp_ctx:
                 pred_noise = model(x, t, lbls)
@@ -82,7 +83,7 @@ class Diffusion:
             sqrt_1_minus_alphas_bar_t = self.sqrt_1_minus_alphas_bar[t][:, None, None, None] # (B,1,1,1)
             sqrt_recip_alphas_t = self.sqrt_recip_alphas[t][:, None, None, None] # (B,1,1,1)
             x = sqrt_recip_alphas_t * (x - betas_t * pred_noise / sqrt_1_minus_alphas_bar_t)
-            if i > 0:
+            if i > 1:
                 sigma_t = self.sqrt_posterior_var[t][:, None, None, None] # (B,1,1,1)
                 x = x + sigma_t * torch.randn_like(x)
             x = x.clamp(-1, 1) # NOTE: This is to retain images in same dist (-1, 1). Otherwise creates maddied images
