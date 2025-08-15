@@ -5,19 +5,19 @@ A minimal, hackable repro of [Denoising Diffusion Probabilistic Model](https://a
 ## Generated samples
 
 ### Landscapes (32x32)
-![Generated Landscapes](./misc/landscapes.png)
+![Generated Landscapes](https://raw.githubusercontent.com/mnjm/diffusion/refs/heads/assets/landscapes.png)
 
 ### CIFAR10 (32x32)
-![Generated CIFAR10](./misc/cifar10.png)
+![Generated CIFAR10](https://raw.githubusercontent.com/mnjm/diffusion/refs/heads/assets/cifar10.png)
 
 ### MNIST with CFG (28x28)
-![MNIST with CFG](./misc/mnist-cfg.jpg)
+![MNIST with CFG](https://raw.githubusercontent.com/mnjm/diffusion/refs/heads/assets/mnist-cfg.jpg)
 
 ### CIFAR10 with CFG (32x32)
 
 **Note**: The whitening and mode collapse below is because I picked the wrong hyperparameters during training. I naively set p_drop to 0.1 without thinking much, which meant the model didn’t learn the unconditional part well. So when generating samples, I noticed it was noisy and bad. (I also sadly did not observe intermediate samples generated during training) To fix it during sampling, I had to use a high CFG scale(6). This helped get strong class samples but also made the images collapse toward class mean hence whitening and mode collapse.
 
-![CIFAR10 with CFG](./misc/cifar10-cfg.png)
+![CIFAR10 with CFG](https://raw.githubusercontent.com/mnjm/diffusion/refs/heads/assets/cifar10-cfg-bad.png)
 
 ## Usage
 
