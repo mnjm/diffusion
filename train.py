@@ -132,7 +132,7 @@ def main(config):
             if config.diffusion.cfg.enable and random.random() < p_keep:
                 lbls = batch[1].to(device)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             B, C, H, W = imgs.shape
             t = diffusion.sample_timesteps(B)
@@ -173,7 +173,7 @@ def main(config):
                 imgs, _ = diffusion.reverse(model, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                 img_path = log_dir / f"{config.model_name}-{epoch:05d}.png"
                 img = save_imgs(imgs, img_path).permute(1, 2, 0).numpy()
-                if config.logging.wandb.log_imgs:
+                if config.logging.wandb.enable and config.logging.wandb.log_imgs:
                     wandb.log({
                         "samples": wandb.Image(img),
                     }, step=epoch)
@@ -181,7 +181,7 @@ def main(config):
                     imgs, _ = diffusion.reverse(ema, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                     img_path = log_dir / f"{config.model_name}-{epoch:05d}-ema.png"
                     img = save_imgs(imgs, img_path).permute(1, 2, 0).numpy()
-                    if config.logging.wandb.log_imgs:
+                    if config.logging.wandb.enable and config.logging.wandb.log_imgs:
                         wandb.log({
                             "ema_samples": wandb.Image(img),
                         }, step=epoch)
