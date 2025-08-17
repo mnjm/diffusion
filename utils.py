@@ -116,6 +116,8 @@ def sample_lbls(n_class, n, device="cpu"):
 class EMAModelWrapper:
 
     def __init__(self, model, beta=0.995, warmup_steps=100):
+        if hasattr(model, '_orig_mod'):
+            model = model._orig_mod
         self.ema_model = deepcopy(model).eval().requires_grad_(False)
         self.beta = beta
         self.warmup_steps = warmup_steps

@@ -172,7 +172,8 @@ def main(config):
                     lbls = sample_lbls(config.dataset.n_classes, config.vis_n_samples, device)
                 imgs, _ = diffusion.reverse(model, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                 img_path = log_dir / f"{config.model_name}-{epoch:05d}.png"
-                img = save_imgs(imgs, img_path).permute(1, 2, 0).numpy()
+                img = save_imgs(imgs, img_path, nrow=config.dataset.n_classes).permute(1, 2, 0).numpy()
+                logger.info(f"Saved sample images generated to {str(img_path)}")
                 if config.logging.wandb.enable and config.logging.wandb.log_imgs:
                     wandb.log({
                         "samples": wandb.Image(img),
@@ -180,12 +181,12 @@ def main(config):
                 if config.ema.enable and ema.is_active():
                     imgs, _ = diffusion.reverse(ema, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                     img_path = log_dir / f"{config.model_name}-{epoch:05d}-ema.png"
-                    img = save_imgs(imgs, img_path).permute(1, 2, 0).numpy()
+                    img = save_imgs(imgs, img_path, nrow=config.dataset.n_classes).permute(1, 2, 0).numpy()
+                    logger.info(f"Saved ema sample images generated to {str(img_path)}")
                     if config.logging.wandb.enable and config.logging.wandb.log_imgs:
                         wandb.log({
                             "ema_samples": wandb.Image(img),
                         }, step=epoch)
-            logger.info(f"Saved sample images generated to {str(img_path)}")
             model.train()
 
         if last_epoch or epoch % config.save_every_epoch == 0:

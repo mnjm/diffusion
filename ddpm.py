@@ -86,11 +86,11 @@ class Diffusion:
             if i > 1:
                 sigma_t = self.sqrt_posterior_var[t][:, None, None, None] # (B,1,1,1)
                 x = x + sigma_t * torch.randn_like(x)
-            x = x.clamp(-1, 1) # NOTE: This is to retain images in same dist (-1, 1). Otherwise creates maddied images
             if debug and i % debug_stepsize == 0 and step_idx < debug_steps:
                 x_debug = ((x.clamp(-1.0, 1) + 1) * 127.5).to("cpu").to(torch.uint8)
                 debug_ret[step_idx] = x_debug
                 step_idx += 1
 
+        x = x.clamp(-1., 1.)
         x = ((x + 1) * 127.5).to("cpu").to(torch.uint8)
         return x, debug_ret

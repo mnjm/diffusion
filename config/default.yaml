@@ -13,7 +13,7 @@ diffusion:
   cfg: # classifier free guidance
     enable: false
     scale: 3.0
-    p_drop: 0.4 # prob at which labels are dropped during training a CFG Diffusion Model
+    p_drop: 0.1 # prob at which labels are dropped during training a CFG Diffusion Model
 
 model_name: ${model.name}-${dataset.name}
 n_epochs: 500
