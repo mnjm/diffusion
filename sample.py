@@ -25,21 +25,20 @@ cfg: # classifier free guidance
 """
 rng_seed = 31415
 
-def sample(ckpt_path: Path, n: int = 20, save: bool = False, beta_steps: int = -1, cfg_scale: float = 3.0):
+def sample(ckpt_path: Path, n: int = 20, save: bool = False, beta_steps: int = -1, cfg_scale: float = 3.0, no_ema: bool = False):
     torch_set_seed(rng_seed)
     device_type = "cuda" if torch.cuda.is_available() else "auto"
     device = torch_get_device(device_type)
 
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-
+    tag = 'model' if no_ema or 'ema' not in ckpt else 'ema'
+    state_dict = ckpt['model'] if tag == 'model' else ckpt['ema']['ema_model']
     if 'model_config' not in ckpt:
         cfg = ckpt['config']
         model_config = DiffusionUNetConfig(**cfg.model)
         model = DiffusionUNet(model_config)
         model.to(device)
-        model.load_state_dict(torch_compile_ckpt_fix(ckpt['model']))
-        print(f"Loaded checkpoint from {ckpt_path}")
-
+        model.load_state_dict(torch_compile_ckpt_fix(state_dict))
         img_size, img_chnls = cfg.dataset.img_size, cfg.dataset.img_chls
         n_classes = cfg.model.n_classes
         diffusion_cfg = cfg.diffusion
@@ -48,12 +47,12 @@ def sample(ckpt_path: Path, n: int = 20, save: bool = False, beta_steps: int = -
         model_config = ckpt['model_config']
         model = DiffusionUNet(model_config)
         model.to(device)
-        model.load_state_dict(torch_compile_ckpt_fix(ckpt['model']))
-        print(f"Loaded checkpoint from {ckpt_path}")
+        model.load_state_dict(torch_compile_ckpt_fix(state_dict))
         img_size, img_chnls = (32, 32), 3
         n_classes = 0
         diffusion_cfg = OmegaConf.create(old_cfg_yml)
         dataset = ckpt['config']['dataset']
+    print(f"Loaded checkpoint from {ckpt_path} with {tag} state dict")
 
     diffusion_cfg.cfg.scale = cfg_scale
     if beta_steps != -1:
@@ -92,6 +91,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--save", action="store_true", help="Save sampled images. Omit to skip saving.")
     parser.add_argument("-st", "--beta_steps", type=int, default=-1, help="Beta timesteps to use for sampling. default: -1 (use training time beta steps)")
     parser.add_argument("-cs", "--cfg_scale", type=float, default=3.0, help="CFG Scale to use with CFG is enabled")
+    parser.add_argument("-ne", "--no_ema", action="store_true", help="Uses non EMA Model if EMA model is available")
 
     args = parser.parse_args()
-    sample(args.ckpt_path, args.num_images, args.save, args.beta_steps, args.cfg_scale)
+    sample(args.ckpt_path, args.num_images, args.save, args.beta_steps, args.cfg_scale, args.no_ema)

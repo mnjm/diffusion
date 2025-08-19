@@ -11,6 +11,6 @@ diffusion:
     scale: 3.0
 ema:
   enable: true
-torch_compile: false
+torch_compile: true
 n_epochs: 500
 vis_n_samples: 50
