@@ -45,8 +45,11 @@ class Diffusion:
         bar_alphas = torch.cos(((x / T) + s) / (1 + s) * torch.pi * 0.5) ** 2
         bar_alphas = bar_alphas / bar_alphas[0]
         betas = 1 - (bar_alphas[1:] / bar_alphas[:-1])
-        # return torch.clip(betas, 0.0001, 0.9999)
-        return torch.clip(betas, 0, 0.9999)
+        # betas = betas.clip(0., 0.9999)
+        betas = betas.clip(self.beta_start, self.beta_end)
+        # NOTE: This is to make sure beta is maintained in sane range and doesnt cause variance mu(x_t,t) to explode at 0.9999
+        # See https://github.com/openai/guided-diffusion/issues/42
+        return betas
 
     @torch.no_grad()
     def forward(self, x_0, t):

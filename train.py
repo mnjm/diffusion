@@ -28,7 +28,7 @@ OmegaConf.register_new_resolver("now_ist", get_ist_time_now)
 
 @hydra.main(version_base=None, config_path="config", config_name="default")
 def main(config):
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger("diffusion")
     device = torch_get_device(config.device_type)
     logger.info(f"Using {device}")
     log_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
