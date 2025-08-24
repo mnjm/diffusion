@@ -1,6 +1,6 @@
 # Diffusion
 
-A minimal, hackable repro of [Denoising Diffusion Probabilistic Model](https://arxiv.org/pdf/2006.11239) with parts of [Improved DDPM](https://arxiv.org/pdf/2102.09672) (cosine beta schedule) and [Classifier Free Guidance](https://arxiv.org/pdf/2207.12598). Model is roughly same UNet used in the paper with Self Attention. Also support classifier free guidance for conditional generation, cosine and linear beta schedules, EMA etc. Datasets experimented with include MNIST. CIFAR-1o and Landscapes. Training script uses Hydra for config and (optional) WandB logging. Still work in progress, but good enough to mess around with generation diffusion models.
+A minimal, hackable repro of [Denoising Diffusion Probabilistic Model](https://arxiv.org/pdf/2006.11239) with parts of [Improved DDPM](https://arxiv.org/pdf/2102.09672) (cosine beta schedule) and [Classifier Free Guidance](https://arxiv.org/pdf/2207.12598). Model is roughly same UNet used in the paper with Self Attention. Also support classifier free guidance for conditional generation, cosine and linear beta schedules, EMA etc. Experimented with include CIFAR-10, MNIST and Landscapes datasets. Training script uses Hydra for config and (optional) WandB logging. Still work in progress, but good enough to mess around with generative diffusion models.
 
 ## Generated samples
 
