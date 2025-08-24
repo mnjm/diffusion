@@ -1,17 +1,16 @@
-import math
 from argparse import ArgumentParser
 from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
 from omegaconf import OmegaConf
-from torchvision.utils import make_grid
 from ddpm import Diffusion
 from model import DiffusionUNet, DiffusionUNetConfig
 from utils import (
     torch_compile_ckpt_fix,
     torch_get_device,
     torch_set_seed,
-    sample_lbls
+    sample_lbls,
+    make_grid
 )
 
 old_cfg_yml = """
@@ -69,9 +68,7 @@ def sample(ckpt_path: Path, n: int = 20, save: bool = False, beta_steps: int = -
     )
     imgs, _ = diffusion.reverse(model, n, lbls)
 
-    nrow = int(math.ceil(math.sqrt(n))) if n_classes == 0 else n_classes
-    grid = make_grid(imgs.to("cpu").float(), nrow=nrow, normalize=True)
-    grid = grid.permute(1, 2, 0).numpy()
+    grid = make_grid(imgs, nrow=n_classes).to("cpu").permute(1, 2, 0).numpy()
     plt.figure(facecolor='black')
     plt.imshow(grid)
     plt.axis("off")

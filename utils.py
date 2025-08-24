@@ -8,10 +8,10 @@ from datasets import concatenate_datasets, load_dataset
 from torch.utils.data import ConcatDataset, Dataset
 import torchvision.transforms as T
 from torchvision import datasets
-from torchvision.utils import make_grid, save_image
+from torchvision.utils import make_grid as pth_make_grid, save_image
 import math
 
-supported_datasets = ['mnist', 'cifar10', 'tiny_imagenet', 'landscapes']
+supported_datasets = ['mnist', 'cifar10', 'tiny-imagenet', 'landscapes']
 
 def torch_get_device(device_type):
     if device_type == "cuda":
@@ -103,11 +103,12 @@ def get_dataset(ds_cfg):
         torch_ds = ConcatDataset([train_ds, val_ds])
     return torch_ds
 
-def save_imgs(imgs, img_path, nrow=0):
+def make_grid(imgs, img_path=None, nrow=0):
     n = imgs.shape[0]
-    nrow = int(math.ceil(math.sqrt(n))) if nrow==0 else nrow
-    grid = make_grid(imgs.float(), nrow=nrow, padding=2, normalize=True)
-    save_image(grid, img_path)
+    nrow = int(math.ceil(math.sqrt(n))) if nrow==0 or nrow > 10 else nrow
+    grid = pth_make_grid(imgs.float(), nrow=nrow, padding=2, normalize=True)
+    if img_path:
+        save_image(grid, img_path)
     return grid
 
 def sample_lbls(n_class, n, device="cpu"):

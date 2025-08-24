@@ -1,4 +1,4 @@
-name: "tiny_imagenet"
+name: "tiny-imagenet"
 img_size: [64, 64]
 img_chls: 3
 hor_flip_aug: true

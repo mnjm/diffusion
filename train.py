@@ -17,7 +17,7 @@ from model import DiffusionUNet, DiffusionUNetConfig
 from utils import (
     EMAModelWrapper,
     get_dataset,
-    save_imgs,
+    make_grid,
     torch_compile_ckpt_fix,
     torch_get_device,
     torch_set_seed,
@@ -50,8 +50,8 @@ def main(config):
     )
     # import matplotlib.pyplot as plt
     # imgs, lbls = next(iter(dataloader))
-    # assert imgs.shape[0] > 16
-    # grid_img = make_grid(imgs[:16, ...], 4, normalize=True).to("cpu").permute(1, 2, 0).numpy()
+    # disp_n = min(imgs.shape[0], 25)
+    # grid_img = make_grid(imgs[:disp_n, ...]).to("cpu").permute(1, 2, 0).numpy()
     # plt.title(f",".join(str(x) for x in lbls.numpy().reshape(-1)[:16]))
     # plt.imshow(grid_img)
     # plt.show()
@@ -72,7 +72,7 @@ def main(config):
         model.to(device)
         model.load_state_dict(torch_compile_ckpt_fix(ckpt['model']))
         logger.info(f"Loaded checkpoint from {config.init_from}")
-        start_epoch = ckpt['epoch']
+        start_epoch = ckpt['epoch'] + 1
 
     logger.info(f"Model type: {model_config.name} params: {sum(p.numel() for p in model.parameters()):,}")
     if config.torch_compile:
@@ -172,7 +172,7 @@ def main(config):
                     lbls = sample_lbls(config.dataset.n_classes, config.vis_n_samples, device)
                 imgs, _ = diffusion.reverse(model, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                 img_path = log_dir / f"{config.model_name}-{epoch:05d}.png"
-                img = save_imgs(imgs, img_path, nrow=config.dataset.n_classes).permute(1, 2, 0).numpy()
+                img = make_grid(imgs, img_path, nrow=config.dataset.n_classes).permute(1, 2, 0).numpy()
                 logger.info(f"Saved sample images generated to {str(img_path)}")
                 if config.logging.wandb.enable and config.logging.wandb.log_imgs:
                     wandb.log({
@@ -181,7 +181,7 @@ def main(config):
                 if config.ema.enable and ema.is_active():
                     imgs, _ = diffusion.reverse(ema, n=config.vis_n_samples, lbls=lbls, amp_ctx=amp_ctx)
                     img_path = log_dir / f"{config.model_name}-{epoch:05d}-ema.png"
-                    img = save_imgs(imgs, img_path, nrow=config.dataset.n_classes).permute(1, 2, 0).numpy()
+                    img = make_grid(imgs, img_path, nrow=config.dataset.n_classes).permute(1, 2, 0).numpy()
                     logger.info(f"Saved ema sample images generated to {str(img_path)}")
                     if config.logging.wandb.enable and config.logging.wandb.log_imgs:
                         wandb.log({
